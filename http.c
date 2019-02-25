@@ -91,42 +91,66 @@ void post(int sock, char* path, char* query, char* buffer, int sizeOfPost) {
 		error(INTERNALSERVERERROR, sock);        
 	}
     char* test;
+    char* test2;
+    char* test3;
     while( received < sizeOfPost) {
         bytes = read(sock, buffr, BYTES);
-        printf("Current contents of buffr are: %s\n", (char*)buffr);
+        //printf("Current contents of buffr are: %s\n", (char*)buffr);
         received += bytes;
-        test = strstr((char*)buffr, "\r\n\r\n");
-        if(test) {
-            if(occurence == 0) { // case 1. first linebreak
+        if(occurence == 0) {
+            test = strstr((char*)buffr, "\r\n\r\n");
+            if(test) {
+                // case 1. first linebreak
                 strncpy(buf, (char*)buffr, strlen((char*)buffr));
                 size_t len = (test + 4) - (char*)buffr;
                 strncpy(tbuf, (char*)buffr + len, strlen((char*)buffr) - len);
-                printf("First buffer: %s\n", tbuf);
+                //printf("First buffer: %s\n", tbuf);
                 occurence++;
                 tbuf[BYTES+1] = '\0';
                 write(fd, tbuf, strlen(tbuf));
                 memset(tbuf, 0, sizeof(tbuf));
                 memset(buffr, 0, strlen((char*)buffr));
                 continue;
-            } else { // case 2, second linebreak
+            }
+        } else {
+            // case 2, second linebreak
+            test2 = strstr((char*)buffr, "\n\r\n");
+            if(test2) {
                 strncpy(buf, (char*)buffr, strlen((char*)buffr));
-                size_t len = (test) - (char*)buffr;
+                size_t len = (test2) - (char*)buffr;
                 
-                printf("Length is: %zu\n",len);
-                printf("Test is: %d\n", (int)*test);
-                printf("Current contents of buffr are: %s\n", (char*)buffr);
+                //printf("Length is: %zu\n",len);
+                //printf("Test is: %d\n", (int)*test2);
+                //printf("Current contents of buffr are: %s\n", (char*)buffr);
                 strncpy(tbuf, (char*)buffr, len);
                 tbuf[strlen((char*)buffr) - len + 1] = '\0';
-                printf("Second buffer: %s\n", tbuf);
+                //printf("Second buffer: %s\n", tbuf);
+                
+                write(fd, tbuf, strlen(tbuf));
+                break;
+            }
+            test3 = strstr((char*)buffr, "\r\n\r\n");
+            if(test3) {
+                strncpy(buf, (char*)buffr, strlen((char*)buffr));
+                size_t len = (test3) - (char*)buffr;
+                
+                //printf("Length is: %zu\n",len);
+                //printf("Test is: %d\n", (int)*test2);
+                //printf("Current contents of buffr are: %s\n", (char*)buffr);
+                strncpy(tbuf, (char*)buffr, len);
+                tbuf[strlen((char*)buffr) - len + 1] = '\0';
+                //printf("Second buffer: %s\n", tbuf);
                 
                 write(fd, tbuf, strlen(tbuf));
                 break;
             }
         }
+        
         write(fd, buffr, bytes);              
     }
-    //write(fd, (void*)"\n\0", 2);
-    sleep(1);
+    write(fd, (void*)"\n", 1);
+    close(fd);
+    //sleep(1);
     snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nContent-Length: %d\nConnection: close\n\n\n", 0);
     write(sock, buffer, strlen(buffer));
 }
