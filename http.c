@@ -11,6 +11,7 @@
 #include <string.h>
 #include<ctype.h>
 
+#define SALT_LEN              2
 #define BYTES              2048
 #define BADREQUEST          400
 #define UNAUTHORIZED        401
@@ -18,7 +19,7 @@
 #define NOTFOUND            404
 #define PAYLOADTOOLARGE     413
 #define INTERNALSERVERERROR 500
-#define ABNORMALEXIT exit(3)
+#define EXIT exit(3)
 #define BADREQUESTMSG          "400: Bad Request\n"
 #define UNAUTHORIZEDMSG        "401: Access Unauthorized\n"
 #define FORBIDDENMSG           "403: Access Forbidden\n"
@@ -60,7 +61,7 @@ void error(int etype, int sock) {
             break;
     }
     
-    ABNORMALEXIT;
+    EXIT;
 }
 
 /* GET handler */
@@ -150,48 +151,136 @@ void post(int sock, char* path, char* query, char* buffer, int sizeOfPost) {
     }
     write(fd, (void*)"\n", 1);
     close(fd);
-    //sleep(1);
     snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nContent-Length: %d\nConnection: close\n\n\n", 0);
     write(sock, buffer, strlen(buffer));
+}
+
+
+void getCwd(int sock, char path[BYTES]) {
+    char localPath[BYTES];
+    if (getcwd(localPath, sizeof(localPath)) == NULL) {
+        error(INTERNALSERVERERROR, sock);
+    }    
+    strcat(localPath, path);
+    strncpy(path, localPath, strlen(localPath));
+    printf("Path in function: %s\n", path);
+}
+
+
+void authenticate(int sock, char* request) {    
+    //printf("%s\n", request);
+    /*
+    char buffer[strlen(request) + 1];
+    strncpy(buffer, request, strlen(request));
+    buffer[sizeof(buffer)] = '\0';    
+    */
+    char* q[BYTES];
+    FILE *in;
+    char s[BYTES];
+    char* u = NULL;
+    char* p = NULL;
+    char* t = NULL;
+    char fp[BYTES];
+    int i = 0;
+    /*
+    q[i] = strchr(request, '?');
+    printf("Str: %s\n", q);
+    */
+    q[i] = strtok(request, " ?=&");    
+    while( q[i] != NULL ) {
+        //printf("Str: %s\n", q[i]);
+        i++;
+        q[i] = strtok(NULL, "=");
+    }
+    //printf("Out of loop...\n");
+    //printf("q[2] == %s\n", q[2]);
+    u = strtok(q[2], "&");
+    //u[strlen(u) + 1] = 0;
+    printf("User: %s\n", u);
+    p = strtok(q[3], " ");
+    printf("Password: %s\n", p);
+    
+    char* salt = strndup(u, SALT_LEN);
+    char localPath[BYTES];
+    if (getcwd(localPath, sizeof(localPath)) == NULL) {
+        error(INTERNALSERVERERROR, sock);
+    }
+    char ustr[] = "/users";
+    printf("File string: %s\n", ustr);
+    t = strncat(localPath, ustr, BYTES);
+    printf("Test\n");
+    strncpy(fp, localPath, strlen(localPath));
+    printf("Filepath: %s\n", fp);
+    printf("User test: %s\n", u);
+    
+    /*
+    if( access( fp, F_OK ) != -1 ) {
+        // file exists
+        printf("All ok\n");
+    } else {
+        // file doesn't exist
+        printf("File DNE\n");
+    }
+    */
+    
+    if( (in = fopen(fp, "r"))== NULL ){
+        error(INTERNALSERVERERROR, sock);
+    }
+    printf("The file is open...\n");
+    while (fgets(s, BYTES, in) != NULL) {
+        //printf("%s", s);
+        puts(s);
+    }
+    printf("Exiting function!\n");
+    /*
+    printf("The query is: %s\n", q);
+    s = strtok(request, "&");
+    p = strtok(s, "=");
+    u = strtok(request, "=");
+    printf("User/Password are: %s / %s\n", u, p);
+    */
+    fclose(in);
+    free(salt);
+    EXIT;
 }
 
 /* Santize the input */
 void parse(int sock, char* request, int type, char* buffer, int sizeOfPost) {
     //printf("Received: %s %d\n", request, sizeOfPost);
     char* pathStart = strchr(request, ' ') + 1;
-    char* pathEnd   = strchr(pathStart, '\0');
-    /*
+    
+    // check size error
     char* qryStart = strchr(pathStart, '?');
-    char* qryEnd = strchr(qryStart, ' ');
-    
-    char path[qryStart - pathStart];
-    char qry[qryEnd - qryStart];   
-    strncpy(path, pathStart, qryStart - pathStart);
-    strncpy(qry, qryStart + 1, qryEnd - qryStart);
-    path[sizeof(path)] = 0;
-    qry[sizeof(qry)] = 0;
-    */
-    char path[pathEnd - pathStart];
-    strncpy(path, pathStart, pathEnd - pathStart);
-    path[sizeof(path)] = '\0';
-    /* Print query for testing
-    char test[BYTES];
-    sprintf(test, "%s\n", path);
-    write(sock, test, strlen(test));
-    sprintf(test, "%s\n", qry);
-    write(sock, test, strlen(test));
-    */
-    char* qry = "";
-    
-    char localPath[BYTES];
-    if (getcwd(localPath, sizeof(localPath)) == NULL) {
-        error(INTERNALSERVERERROR, sock);
-    }
-    strcat(localPath, path);
-    if( type == 0 ) {
-        post(sock, localPath, qry, buffer, sizeOfPost);
+    if(qryStart) {
+        char* qryEnd = strchr(qryStart, ' ');
+        printf("Here");
+        char path[qryStart - pathStart];
+        char qry[qryEnd - qryStart];   
+        strncpy(path, pathStart, qryStart - pathStart);
+        strncpy(qry, qryStart + 1, qryEnd - qryStart);
+        path[sizeof(path)] = 0;
+        qry[sizeof(qry)] = 0;
+        //authenticate(sock, path, qry);
+        getCwd(sock, path);
+        printf("The path is: %s\nand the query is: %s\n", path, qry);
+        if( type == 0 ) {
+        post(sock, path, qry, buffer, sizeOfPost);
+        } else {
+            get(sock, path, qry, buffer);
+        }
     } else {
-        get(sock, localPath, qry, buffer);
+        char* pathEnd   = strchr(pathStart, '\0');
+        char path[pathEnd - pathStart];
+        strncpy(path, pathStart, pathEnd - pathStart);
+        path[sizeof(path)] = '\0';
+        char* qry = "";
+        
+        getCwd(sock, path);
+        if( type == 0 ) {
+        post(sock, path, qry, buffer, sizeOfPost);
+        } else {
+            get(sock, path, qry, buffer);
+        }
     }
 }
 
@@ -236,7 +325,7 @@ void httpRequest(int sock, char *request) {
     int type, sizeOfPost;
     static char buffer[BYTES];
     static char newRequest[BYTES];
-    printf("%s\n", request);
+    printf("\n%s\n", request);
     if( len  > BYTES ) {
         error(PAYLOADTOOLARGE, sock);
     }
@@ -247,7 +336,11 @@ void httpRequest(int sock, char *request) {
         error(BADREQUEST, sock);
     } else if(strncmp(request,"GET ", 4) && strncmp(request,"get ", 4)) {
         type = 0; // post
-        
+        strncpy(buffer, request, BYTES);
+        char* s = strtok(request, " ");
+        if(strncmp("login", s, 5)) {
+            authenticate(sock, buffer);
+        }
         char* getSize = request;
         char* charSize;
         for(int j = 0; j < 4;j++) {
@@ -256,7 +349,7 @@ void httpRequest(int sock, char *request) {
             }
             getSize++;
         }
-        charSize = strchr(getSize, ':');
+        charSize = strchr(getSize, ':');        
         charSize += 1;
         charSize = cleanup(charSize);
         charSize += 1;
@@ -274,7 +367,7 @@ void httpRequest(int sock, char *request) {
 	    if(newRequest[i] == ' ')
 	        newRequest[i]='\0';    
     }
-    printf("Request with int: %s, %d\n", newRequest, sizeOfPost);   
+    printf("Request with int: %s, %d\n", newRequest, sizeOfPost);
     parse(sock, newRequest, type, buffer, sizeOfPost);
 }
 
