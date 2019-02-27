@@ -5,7 +5,7 @@
 #
 
 CFLAGS = -Wall #-fno-stack-protector -z execstack
-LIBS = -lpthread
+LIBS = -lpthread -lcrypt
 CC = gcc
 
 all: server 
