@@ -5,18 +5,17 @@
  */
  
  /* 
-    Login - Be sure to save the token
+    Login - Be sure to save the token and then use Set-Cookie: 
     
     Use:
     
-    curl -v POST "localhost:<port>/login?username=user&password=pass"
+    curl -vX POST "localhost:<port>/login?username=user&password=pass"
     
     GET - Important to not forget the pipe at the end so the file is downloaded
     
     Use:
     
-    curl -v "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token
-        you received from logging in>" > <desired filename>
+    curl -v "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token>" > <desired filename>
     
     POST - originally only supported posting via the form data flag, but 
         changed to also support binary transfer. As a result may have intro-
@@ -24,13 +23,12 @@
         
     Use:
     
-    curl -v POST "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token
-        you received from logging in>" --data-binary "@<filename>"
+    curl -v POST "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token>" --data-binary "@<filename>"
         
-    or
+    or this second command can be used with most files and MUST be used 
+        with text or .txt files
     
-    curl -vF 'file=@<file>' "localhost:<port>/<user>/<file>" --header "Set-
-        Cookie: <Token you received from logging in>"
+    curl -vF 'file=@<file>' "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token>"
     
  */
 #include <stdio.h>
@@ -60,7 +58,6 @@
 #define NOTFOUNDMSG            "HTTP/1.1 404: Requested resource not found\r\n\r\n"
 #define PAYLOADTOOLARGEMSG     "HTTP/1.1 413: Payload is too large for the recipient buffer\r\n\r\n"
 #define INTERNALSERVERERRORMSG "HTTP/1.1 500: Internal server error\r\n\r\n"
-
 /*
 static void binary(int sock, char *fname) {
     int fd;
@@ -113,7 +110,7 @@ void get(int sock, char* path, char* query, char* buffer) {
 
 /* POST handler */
 void post(int sock, char* path, char* query, char* buffer, int sizeOfPost, char* boundary) {
-    int bytes, fd, len;
+    int bytes, fd;
     int received = 0;
     int headerDump = 0;
     void* buffr[BYTES];    
@@ -125,18 +122,15 @@ void post(int sock, char* path, char* query, char* buffer, int sizeOfPost, char*
     while( (received < sizeOfPost) && (bytes > 0)) {
         bytes = read(sock, buffr, BYTES);
         received += bytes;
-        printf("Bytes read: %d\n", received);        
+        // Is transmission form encoded? Dump/remove the header/footer
         if(headerDump == 0 && boundary != NULL) {
             headerDump++;
             continue;
-        } else if ( boundary != NULL ) { // 40
+        } else if ( boundary != NULL ) {
             bound = strstr((char*)buffr, boundary);
             if(bound) {
-                //len = strlen(boundary);
-                //len = bound + 4 - (char*)buffr;
                 bound -= 4;
                 *bound = '\0';
-                //strcat((char*)buffr, bound + len);
                 strncpy(buffer, (char*)buffr, strlen((char*)buffr));
                 write(fd, buffr, strlen((char*)buffr));
                 headerDump++;
@@ -161,7 +155,7 @@ void getPath(int sock, char* path) {
     strncpy(path, localPath, strlen(localPath));
 }
 
-/* Create user directory during authentication */
+/* Create user directory during authentication if necessary */
 void dir(int sock, char* path) {
     if( access( path, F_OK ) != -1 ) {
         // exists do nothing
@@ -186,7 +180,6 @@ char* tokenFetcher (char* s) {
     static char t[16];
     for(int i = 0; i <= m; i++) {
         char temp = seed[i] ^ s[l];
-        //printf("Date: %d\n", d);
         temp ^= d;
         if(!isprint(temp)) {
             temp = '1';
@@ -195,7 +188,6 @@ char* tokenFetcher (char* s) {
         if( temp == ' '|| temp == '?' || temp == '=' || temp == '&') {
             temp = '2';
         }        
-        //printf("temp is %c\n", temp);
         t[i] = temp;
         if(l == size) {
             l = 0;
@@ -207,7 +199,7 @@ char* tokenFetcher (char* s) {
     return t;
 }
 
-
+/* Login handler, return token */
 void authenticate(int sock, char* request, char* buffer) {    
     char* q[BYTES];
     FILE *in;
@@ -269,7 +261,7 @@ void authenticate(int sock, char* request, char* buffer) {
 /* Santize the input and extract variables*/
 void parse(int sock, char* request, int type, char* buffer) {
     FILE *in;
-    int sizeOfPost = 0; int i = 0; int j = 0;
+    int sizeOfPost = 0; int i = 0; int j = 0; int found = 0;
     char* rq[BYTES];
     char buf[BYTES];
     char fp[BYTES];    
@@ -281,7 +273,6 @@ void parse(int sock, char* request, int type, char* buffer) {
     strncpy(buf, request, BYTES);
     rq[i] = strtok(buf, " =&\r\n:");
     while( rq[i] != NULL ) {
-        printf("Token: %s\n", rq[i]);
         i++;
         rq[i] = strtok(NULL, " =&\r\n:");
         
@@ -293,22 +284,7 @@ void parse(int sock, char* request, int type, char* buffer) {
     cookie = rq[j+1];
     j = 0;
     if(cookie == NULL) {
-        while(strncmp("Cookie", rq[j], 10) != 0) {
-            j++;
-        }
-        cookie = rq[j+1];
-        j = 0;
-        if(cookie == NULL) {
-            while(strncmp("cookie", rq[j], 10) != 0) {
-                j++;
-            }
-            cookie = rq[j+1];
-            j = 0;
-            if(cookie == NULL) {
-                //write(sock,"Must send token in key:value pair Set-Cookie, Cookie, or cookie\n", 64);
-                error(BADREQUEST, sock);
-            }
-        }
+        error(BADREQUEST, sock);
     }
     char* path = rq[1];
     char* userStart = strchr(rq[1], '/') + 1;
@@ -329,13 +305,15 @@ void parse(int sock, char* request, int type, char* buffer) {
         char* tp = strtok(NULL, "\n");
         if(strncmp(user, tu, strlen(user)) == 0) {
             char* hash = tokenFetcher(tp);
-            printf("The hash is: %s\n", hash);
             if(strncmp(hash, cookie, strlen(cookie)) == 0) {
+                found++;
                 break;
             } else
                 error(UNAUTHORIZED, sock);
         }
     }
+    if(found == 0)
+        error(UNAUTHORIZED, sock);
     fclose(in);
     // authorized submit get or post
     memset(localPath, 0, BYTES);
