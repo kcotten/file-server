@@ -3,6 +3,36 @@
  * You may not use, distribute, or modify this code without
  * the express written permission of the copyright holder.
  */
+ 
+ /* 
+    Login - Be sure to save the token
+    
+    Use:
+    
+    curl -v POST "localhost:<port>/login?username=user&password=pass"
+    
+    GET - Important to not forget the pipe at the end so the file is downloaded
+    
+    Use:
+    
+    curl -v "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token
+        you received from logging in>" > <desired filename>
+    
+    POST - originally only supported posting via the form data flag, but 
+        changed to also support binary transfer. As a result may have intro-
+        duced corner case bugs along with the other ones I already had :)
+        
+    Use:
+    
+    curl -v POST "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token
+        you received from logging in>" --data-binary "@<filename>"
+        
+    or
+    
+    curl -vF 'file=@<file>' "localhost:<port>/<user>/<file>" --header "Set-
+        Cookie: <Token you received from logging in>"
+    
+ */
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -13,6 +43,7 @@
 #include <ctype.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 
 #define SALT_LEN              2
 #define BYTES              2048
@@ -23,18 +54,12 @@
 #define PAYLOADTOOLARGE     413
 #define INTERNALSERVERERROR 500
 #define EXIT exit(3)
-#define BADREQUESTMSG          "HTTP/1.1 400: Bad Request\n"
-#define UNAUTHORIZEDMSG        "HTTP/1.1 401: Access Unauthorized\n"
-#define FORBIDDENMSG           "HTTP/1.1 403: Access Forbidden\n"
-#define NOTFOUNDMSG            "HTTP/1.1 404: Requested resource not found\n"
-#define PAYLOADTOOLARGEMSG     "HTTP/1.1 413: Payload is too large for the recipient buffer\n"
-#define INTERNALSERVERERRORMSG "HTTP/1.1 500: Internal server error\n"
-
-#define R0(v,w,x,y,z,i) z+=((w&(x^y))^y)+blk0(i)+0x5A827999+rol(v,5);w=rol(w,30);
-#define R1(v,w,x,y,z,i) z+=((w&(x^y))^y)+blk(i)+0x5A827999+rol(v,5);w=rol(w,30);
-#define R2(v,w,x,y,z,i) z+=(w^x^y)+blk(i)+0x6ED9EBA1+rol(v,5);w=rol(w,30);
-#define R3(v,w,x,y,z,i) z+=(((w|x)&y)|(w&x))+blk(i)+0x8F1BBCDC+rol(v,5);w=rol(w,30);
-#define R4(v,w,x,y,z,i) z+=(w^x^y)+blk(i)+0xCA62C1D6+rol(v,5);w=rol(w,30);
+#define BADREQUESTMSG          "HTTP/1.1 400: Bad Request\r\n\r\n"
+#define UNAUTHORIZEDMSG        "HTTP/1.1 401: Access Unauthorized\r\n\r\n"
+#define FORBIDDENMSG           "HTTP/1.1 403: Access Forbidden\r\n\r\n"
+#define NOTFOUNDMSG            "HTTP/1.1 404: Requested resource not found\r\n\r\n"
+#define PAYLOADTOOLARGEMSG     "HTTP/1.1 413: Payload is too large for the recipient buffer\r\n\r\n"
+#define INTERNALSERVERERRORMSG "HTTP/1.1 500: Internal server error\r\n\r\n"
 
 /*
 static void binary(int sock, char *fname) {
@@ -82,45 +107,52 @@ void get(int sock, char* path, char* query, char* buffer) {
 	}
     while (	(bytes = read(fd, buffer, BYTES)) > 0 ) {
 		write(sock, buffer, bytes);
-	}
-    
+	}    
     sleep(1);
 }
 
 /* POST handler */
 void post(int sock, char* path, char* query, char* buffer, int sizeOfPost, char* boundary) {
-    int bytes, fd;
+    int bytes, fd, len;
     int received = 0;
     int headerDump = 0;
-    void* buffr[BYTES];
-    
+    void* buffr[BYTES];    
     if(( fd = open(path, O_CREAT | O_RDWR)) == -1) {
 		error(INTERNALSERVERERROR, sock);        
 	}
     char* bound;
-    while( received < sizeOfPost) {
+    bytes = 1;
+    while( (received < sizeOfPost) && (bytes > 0)) {
         bytes = read(sock, buffr, BYTES);
         received += bytes;
-        printf("Bytes read: %d\n", received);
-        if(headerDump == 0) {
-            //strncpy(buf, (char*)buffr, strlen((char*)buffr));
-            //test = strchr(buf, '-');
+        printf("Bytes read: %d\n", received);        
+        if(headerDump == 0 && boundary != NULL) {
             headerDump++;
-        } else {
+            continue;
+        } else if ( boundary != NULL ) { // 40
             bound = strstr((char*)buffr, boundary);
             if(bound) {
+                //len = strlen(boundary);
+                //len = bound + 4 - (char*)buffr;
+                bound -= 4;
+                *bound = '\0';
+                //strcat((char*)buffr, bound + len);
+                strncpy(buffer, (char*)buffr, strlen((char*)buffr));
+                write(fd, buffr, strlen((char*)buffr));
+                headerDump++;
                 break;
-            }
-            write(fd, buffr, bytes);
-            memset(buffr, 0, BYTES);
+            }           
         }
+        write(fd, buffr, bytes);
+        memset(buffr, 0, BYTES);
     }
+    memset(buffer, 0, BYTES);
     close(fd);
     snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nContent-Length: %d\nConnection: close\r\n\r\n", 0);
     write(sock, buffer, strlen(buffer));
 }
 
-
+/* Return local path */
 void getPath(int sock, char* path) {
     char localPath[BYTES];
     if (getcwd(localPath, sizeof(localPath)) == NULL) {
@@ -129,7 +161,7 @@ void getPath(int sock, char* path) {
     strncpy(path, localPath, strlen(localPath));
 }
 
-
+/* Create user directory during authentication */
 void dir(int sock, char* path) {
     if( access( path, F_OK ) != -1 ) {
         // exists do nothing
@@ -142,25 +174,29 @@ void dir(int sock, char* path) {
     }
 }
 
-
-char* hash_function (char* s) {
+/* Token generator */
+char* tokenFetcher (char* s) {
+    time_t date = time(NULL);
+    struct tm dm = *localtime(&date);
+    int d = dm.tm_mday;
     int m = 16;
     int l = 0;
     size_t size = strlen(s) - 1;
     char* seed = "\a\a\n !)(./.\n\n,+  ";
     static char t[16];
     for(int i = 0; i <= m; i++) {
-        //printf("seed is: %c and password is: %c  :  ", seed[i], s[l]);
         char temp = seed[i] ^ s[l];
+        //printf("Date: %d\n", d);
+        temp ^= d;
         if(!isprint(temp)) {
             temp = '1';
         }
         //  ?=&
         if( temp == ' '|| temp == '?' || temp == '=' || temp == '&') {
             temp = '2';
-        }
+        }        
+        //printf("temp is %c\n", temp);
         t[i] = temp;
-        //printf("s[] is now: %c\n", t[i]);
         if(l == size) {
             l = 0;
             continue;
@@ -201,7 +237,6 @@ void authenticate(int sock, char* request, char* buffer) {
     if( (in = fopen(fp, "r"))== NULL ){
         error(INTERNALSERVERERROR, sock);
     }
-    //printf("The file is open...\n");
     size_t usize, psize;
     usize = psize = 0;
     while (fgets(s, BYTES, in) != NULL) {
@@ -213,14 +248,8 @@ void authenticate(int sock, char* request, char* buffer) {
             if(strncmp(u, tu, usize) == 0) {
                 if(strncmp(p, tp, psize) == 0) {
                     // generate token
-                    //char* tsalt = strndup(tu, SALT_LEN);
-                    //unsigned long n = strlen(tp);
                     char* hash = NULL;
-                    hash = hash_function(tp);
-                    printf("The value of the hash is: %s\n", hash);
-                    //SHA1((unsigned char*)tp, n, (unsigned char*)hash);
-                    //free(tsalt);
-
+                    hash = tokenFetcher(tp);
                     memset(localPath, 0, BYTES);
                     getPath(sock, localPath);
                     strcat(localPath, "/\0");
@@ -251,10 +280,13 @@ void parse(int sock, char* request, int type, char* buffer) {
     
     strncpy(buf, request, BYTES);
     rq[i] = strtok(buf, " =&\r\n:");
-    while( rq[i] != NULL ) {        
+    while( rq[i] != NULL ) {
+        printf("Token: %s\n", rq[i]);
         i++;
         rq[i] = strtok(NULL, " =&\r\n:");
-    }    
+        
+    }
+    // prefer Set-Cookie, but accept a few others just in case
     while(strncmp("Set-Cookie", rq[j], 10) != 0) {
         j++;
     }
@@ -296,14 +328,7 @@ void parse(int sock, char* request, int type, char* buffer) {
         char* tu = strtok(s, ":");
         char* tp = strtok(NULL, "\n");
         if(strncmp(user, tu, strlen(user)) == 0) {
-            // generate token and then check against provided one
-            /*
-            char* tsalt = strndup(tu, SALT_LEN);
-            struct crypt_data *data = NULL;
-            char* thash = crypt_r(tp, tsalt, data);
-            free(tsalt);
-            */
-            char* hash = hash_function(tp);
+            char* hash = tokenFetcher(tp);
             printf("The hash is: %s\n", hash);
             if(strncmp(hash, cookie, strlen(cookie)) == 0) {
                 break;
@@ -312,54 +337,47 @@ void parse(int sock, char* request, int type, char* buffer) {
         }
     }
     fclose(in);
-    // we are authorized now submit a get or post
+    // authorized submit get or post
     memset(localPath, 0, BYTES);
     if (getcwd(localPath, sizeof(localPath)) == NULL) {
             error(INTERNALSERVERERROR, sock);
     }
     strncat(localPath, path, strlen(path));
     char* qry = NULL;
-    // one last thing get the boundary!!!!    
+    char* boundary = NULL;
     if(type == 0) {
         while(strncmp("Content-Length", rq[j], 10) != 0) {
             j++;
         }
         sizeOfPost = (int)strtol(rq[j+1], &rq[j+1], 10);
+        if( sizeOfPost == 0 )
+            error(BADREQUEST, sock);
         j = 0;
-        while((strncmp("boundary", rq[j], 10) != 0)) {
+        while(strncmp("Content-Type", rq[j], 10) != 0) {
             j++;
         }
-        char* boundary = rq[j+1];
-        if(boundary == NULL) {
+        if( strncmp("multipart/form-data", rq[j+1], 19) == 0){
             j = 0;
-            while((strncmp("Boundary", rq[j], 10) != 0)) {
+            while((strncmp("boundary", rq[j], 10) != 0)) {
                 j++;
             }
             boundary = rq[j+1];
             if(boundary == NULL) {
-                write(sock, "Must send boundary key/value pair\n", 34);
-                error(BADREQUEST, sock);
-            }
+                j = 0;
+                while((strncmp("Boundary", rq[j], 10) != 0)) {
+                    j++;
+                }
+                boundary = rq[j+1];
+                if(boundary == NULL) {
+                    error(BADREQUEST, sock);
+                }
+            }            
         }
         post(sock, localPath, qry, buffer, sizeOfPost, boundary);
     } else {
         get(sock, localPath, qry, buffer);
     }
     EXIT;
-}
-
-
-char* cleanup(char* request) {
-    char* clean = request;
-    for(int i=0; i < strlen(clean);i++) {
-	    if(clean[i] == '\r' || clean[i] == '\n')
-	        clean[i]='*';    
-    }
-    for(int i=0; i < strlen(clean);i++) {
-	    if(clean[i] == '*')
-	        clean[i]='\0';    
-    }
-    return clean;
 }
 
 
