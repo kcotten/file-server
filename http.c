@@ -15,7 +15,7 @@
     
     Use:
     
-    curl -v "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token>" > <desired filename>
+    curl -vb 'token=<Token>' "localhost:<port>/<user>/<file>" --header > <desired filename>
     
     POST - originally only supported posting via the form data flag, but 
         changed to also support binary transfer. As a result may have intro-
@@ -23,12 +23,12 @@
         
     Use:
     
-    curl -v POST "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token>" --data-binary "@<filename>"
+    curl -vb 'token=<Token>' -X POST "localhost:<port>/<user>/<file>" --data-binary "@<filename>"
         
     or this second command can be used with most files and MUST be used 
-        with text or .txt files
+        with text or .txt files otherwise will hang
     
-    curl -vF 'file=@<file>' "localhost:<port>/<user>/<file>" --header "Set-Cookie: <Token>"
+    curl -vb 'token=<Token>' -F 'file=@<file>' "localhost:<port>/<user>/<file>"
     
  */
 #include <stdio.h>
@@ -247,7 +247,7 @@ void authenticate(int sock, char* request, char* buffer) {
                     strcat(localPath, "/\0");
                     strcat(localPath, u);
                     dir(sock, localPath);
-                    snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nSet-Cookie: %s\nConnection: close\r\n\r\n", hash);
+                    snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nSet-Cookie: token=%s\nConnection: close\r\n\r\n", hash);
                     write(sock, buffer, strlen(buffer));
                     EXIT;
                 }
@@ -277,11 +277,10 @@ void parse(int sock, char* request, int type, char* buffer) {
         rq[i] = strtok(NULL, " =&\r\n:");
         
     }
-    // prefer Set-Cookie, but accept a few others just in case
-    while(strncmp("Set-Cookie", rq[j], 10) != 0) {
+    while(strncmp("Cookie", rq[j], 10) != 0) {
         j++;
     }
-    cookie = rq[j+1];
+    cookie = rq[j+2];
     j = 0;
     if(cookie == NULL) {
         error(BADREQUEST, sock);
