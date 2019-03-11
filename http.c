@@ -15,7 +15,7 @@
     
     Use:
     
-    curl -vb 'token=<Token>' "localhost:<port>/<user>/<file>" --header > <desired filename>
+    curl -vb 'token=<Token>' "localhost:<port>/<user>/<file>" > <desired filename>
     
     POST - originally only supported posting via the form data flag, but 
         changed to also support binary transfer. As a result may have intro-
@@ -169,24 +169,45 @@ void dir(int sock, char* path) {
 }
 
 /* Token generator */
-char* tokenFetcher (char* s) {
+char* tokenFetcher (char* s1, char* s2) {
     time_t date = time(NULL);
     struct tm dm = *localtime(&date);
     int d = dm.tm_mday;
     int m = 16;
     int l = 0;
-    size_t size = strlen(s) - 1;
+    //int shift = 0;
+    size_t size1 = strlen(s1) - 1;
+    size_t size2 = strlen(s2) - 1;
+    size_t size;
+    if( size1 < size2 ) {
+        size = size1;
+    } else {
+        size = size2;
+    }
     char* seed = "\a\a\n !)(./.\n\n,+  ";
     static char t[16];
+    char temp;
     for(int i = 0; i <= m; i++) {
-        char temp = seed[i] ^ s[l];
+        if( (i % 2) == 0 ) {
+            temp = seed[i] ^ s2[l];            
+        } else {
+            temp = seed[i] ^ s1[l];            
+        }
         temp ^= d;
         if(!isprint(temp)) {
-            temp = '1';
+            temp -= 100;
+            while(!isprint(temp))
+                temp -= 1;
+        }
+        if(temp == '~') {
+            temp ^= d;
+            temp ^= i;
         }
         //  ?=&
-        if( temp == ' '|| temp == '?' || temp == '=' || temp == '&') {
-            temp = '2';
+        while( temp == ' '|| temp == '?' || temp == '=' || temp == '&') {
+            temp -= 1;
+            while(!isprint(temp))
+                temp -= 1;
         }        
         t[i] = temp;
         if(l == size) {
@@ -241,7 +262,7 @@ void authenticate(int sock, char* request, char* buffer) {
                 if(strncmp(p, tp, psize) == 0) {
                     // generate token
                     char* hash = NULL;
-                    hash = tokenFetcher(tp);
+                    hash = tokenFetcher(tu, tp);
                     memset(localPath, 0, BYTES);
                     getPath(sock, localPath);
                     strcat(localPath, "/\0");
@@ -303,7 +324,7 @@ void parse(int sock, char* request, int type, char* buffer) {
         char* tu = strtok(s, ":");
         char* tp = strtok(NULL, "\n");
         if(strncmp(user, tu, strlen(user)) == 0) {
-            char* hash = tokenFetcher(tp);
+            char* hash = tokenFetcher(tu, tp);
             if(strncmp(hash, cookie, strlen(cookie)) == 0) {
                 found++;
                 break;
@@ -372,6 +393,12 @@ void httpRequest(int sock, char *request) {
     }
     if( len <= 0 ) {
         error(BADREQUEST, sock);
+    }
+    size_t size = strlen(request);
+    for( int i = 0; i < size; i++ ) {
+		if(request[i] == '.' && request[i+1] == '.') {
+            error(UNAUTHORIZED, sock);
+        }
     }
     strncpy(buffer, request, BYTES);
     if( strncmp(request,"GET ", 4) && strncmp(request,"get ", 4) && strncmp(request, "POST ", 5) && strncmp(request, "post ", 5) ) {
