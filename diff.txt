@@ -1,0 +1,178 @@
+18c18
+<     curl -vb 'token=<Token>' "localhost:<port>/<user>/<file>" > <desired filename>
+---
+>     curl -vb 'token=<Token>' "localhost:<port>/<user>/<filename>" > <desired filename>
+20c20,21
+<     POST - supports any transfer with 'Expected: 100-continue' in the header
+---
+>     POST - support binary-data transfer and limited support for text transfers
+>         via the second option, not all cases work when using form setting
+24c25
+<     curl -vb 'token=<Token>' -X POST "localhost:<port>/<user>/<file>" --data-binary "@<filename>"
+---
+>     curl -vb 'token=<Token>' -X POST "localhost:<port>/<user>/<filename>" --data-binary "@<filename>"
+26c27,28
+<     or
+---
+>     or this second command can be used with most files and MUST be used 
+>         with text or .txt files otherwise cUrl will hang
+28,33c30
+<     curl -vb 'token=<Token>' -F 'file=@<file>' "localhost:<port>/<user>/<file>"
+<     
+<     or
+<     
+<     curl -vb 'token=<Token>' -X POST "localhost:<port>/<user>/<file>" --data-binary @<file>.txt --header 'Expect: 100-continue'
+<         *Will ensure delivery
+---
+>     curl -vb 'token=<Token>' -F 'file=@<filename>' "localhost:<port>/<user>/<filename>"
+47a45
+> #define SALT_LEN              2
+53d50
+< #define FORMAT              405
+57,63c54,59
+< #define BADREQUESTMSG          "HTTP/1.1 400: Bad Request\nContent-Length: 0\nConnection: close\r\n\r\n"
+< #define UNAUTHORIZEDMSG        "HTTP/1.1 401: Access Unauthorized\nContent-Length: 0\nConnection: close\r\n\r\n"
+< #define FORBIDDENMSG           "HTTP/1.1 403: Access Forbidden\nContent-Length: 0\nConnection: close\r\n\r\n"
+< #define NOTFOUNDMSG            "HTTP/1.1 404: Requested resource not found\nContent-Length: 0\nConnection: close\r\n\r\n"
+< #define PAYLOADTOOLARGEMSG     "HTTP/1.1 413: Payload is too large for the recipient buffer\nContent-Length: 0\nConnection: close\r\n\r\n"
+< #define INTERNALSERVERERRORMSG "HTTP/1.1 500: Internal server error\nContent-Length: 0\nConnection: close\r\n\r\n"
+< #define FORMATERRORMSG         "HTTP/1.1 400: Bad Request\nAttempt to transfer file without 'Expect: 100-continue'\nContent-Length: 0\nConnection: close\r\n\r\n"
+---
+> #define BADREQUESTMSG          "HTTP/1.1 400: Bad Request\r\n\r\n"
+> #define UNAUTHORIZEDMSG        "HTTP/1.1 401: Access Unauthorized\r\n\r\n"
+> #define FORBIDDENMSG           "HTTP/1.1 403: Access Forbidden\r\n\r\n"
+> #define NOTFOUNDMSG            "HTTP/1.1 404: Requested resource not found\r\n\r\n"
+> #define PAYLOADTOOLARGEMSG     "HTTP/1.1 413: Payload is too large for the recipient buffer\r\n\r\n"
+> #define INTERNALSERVERERRORMSG "HTTP/1.1 500: Internal server error\r\n\r\n"
+91,93d86
+<         case FORMAT:
+<             write(sock, FORMATERRORMSG, strlen(FORMATERRORMSG));
+<             break;
+123c116
+<     if(( fd = open(path, O_CREAT | O_RDWR, 0666)) == -1) {
+---
+>     if(( fd = open(path, O_CREAT | O_RDWR)) == -1) {
+151c144
+<     snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: Totally Secure HTTP Server\nContent-Length: %d\nConnection: close\r\n\r\n", 0);
+---
+>     snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nContent-Length: %d\nConnection: close\r\n\r\n", 0);
+178c171
+< char* tokenFetcher (char* s1, char* s2) {
+---
+> char* tokenFetcher (char* s) {
+184,192c177
+<     size_t size1 = strlen(s1) - 1;
+<     size_t size2 = strlen(s2) - 1;
+<     size_t slen  = size1;
+<     size_t size;
+<     if( size1 < size2 ) {
+<         size = size1;
+<     } else {
+<         size = size2;
+<     }
+---
+>     size_t size = strlen(s) - 1;
+195d179
+<     char temp;
+197,207c181
+<         if( (i % 2) == 0 ) {
+<             temp = seed[i] ^ s2[l];
+<         } else {
+<             if((slen % 2) == 0) {
+<                 temp = seed[i] ^ s1[slen];
+<                 slen--;
+<                 if(slen <= 0) slen = size1;
+<             } else {
+<                 temp = seed[i] ^ s1[l];
+<             }
+<         }
+---
+>         char temp = seed[i] ^ s[l];
+209,215c183,184
+<         if(!isalnum(temp)) {
+<             temp -= 50;
+<             while(!isalnum(temp))
+<                 temp -= 1;
+<         }
+<         if(temp == 'z') {
+<             temp ^= i;
+---
+>         if(!isprint(temp)) {
+>             temp = '1';
+217,218c186,189
+<         while(!isalnum(temp))
+<             temp ^= i;
+---
+>         //  ?=&
+>         if( temp == ' '|| temp == '?' || temp == '=' || temp == '&') {
+>             temp = '2';
+>         }        
+264d234
+<         if(tu[0] == '\n' || tu[0] == '\0') break;
+270,283c240,251
+<                 if(passsize == psize) {
+<                     if(strncmp(p, tp, psize) == 0) {
+<                         // generate token
+<                         char* hash = NULL;
+<                         hash = tokenFetcher(tu, tp);
+<                         memset(localPath, 0, BYTES);
+<                         getPath(sock, localPath);
+<                         strcat(localPath, "/\0");
+<                         strcat(localPath, u);
+<                         dir(sock, localPath);
+<                         snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: Totally Secure HTTP Server\nSet-Cookie: token=%s; Expires=Midnight\nContent-Length: 0\nConnection: close\r\n\r\n", hash);
+<                         write(sock, buffer, strlen(buffer));
+<                         EXIT;
+<                     }
+---
+>                 if(strncmp(p, tp, psize) == 0) {
+>                     // generate token
+>                     char* hash = NULL;
+>                     hash = tokenFetcher(tp);
+>                     memset(localPath, 0, BYTES);
+>                     getPath(sock, localPath);
+>                     strcat(localPath, "/\0");
+>                     strcat(localPath, u);
+>                     dir(sock, localPath);
+>                     snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nSet-Cookie: token=%s\nConnection: close\r\n\r\n", hash);
+>                     write(sock, buffer, strlen(buffer));
+>                     EXIT;
+307c275
+<         i++;        
+---
+>         i++;
+311,315d278
+<     while(strncmp("Expect", rq[j], 6) != 0) {
+<         j++;
+<         if(j == i) error(FORMAT, sock);
+<     }
+<     j = 0;
+318d280
+<         if(j == i) error(BADREQUEST, sock);
+320c282
+<     cookie = rq[j+2];    
+---
+>     cookie = rq[j+2];
+321a284,286
+>     if(cookie == NULL) {
+>         error(BADREQUEST, sock);
+>     }
+340c305
+<             char* hash = tokenFetcher(tu, tp);
+---
+>             char* hash = tokenFetcher(tp);
+351c316
+<     // authorized now submit get or post
+---
+>     // authorized submit get or post
+370c335
+<         if(strncmp("multipart/form-data", rq[j+1], 19) == 0){
+---
+>         if( strncmp("multipart/form-data", rq[j+1], 19) == 0){
+409,414d373
+<     }
+<     size_t size = strlen(request);
+<     for( int i = 0; i < size; i++ ) {
+< 		if(request[i] == '.' && request[i+1] == '.') {
+<             error(UNAUTHORIZED, sock);
+<         }
