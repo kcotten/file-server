@@ -17,18 +17,20 @@
     
     curl -vb 'token=<Token>' "localhost:<port>/<user>/<file>" > <desired filename>
     
-    POST - originally only supported posting via the form data flag, but 
-        changed to also support binary transfer. As a result may have intro-
-        duced corner case bugs along with the other ones I already had :)
+    POST - supports any transfer with 'Expected: 100-continue' in the header
         
     Use:
     
     curl -vb 'token=<Token>' -X POST "localhost:<port>/<user>/<file>" --data-binary "@<filename>"
         
-    or this second command can be used with most files and MUST be used 
-        with text or .txt files otherwise will hang
+    or
     
     curl -vb 'token=<Token>' -F 'file=@<file>' "localhost:<port>/<user>/<file>"
+    
+    or
+    
+    curl -vb 'token=<Token>' -X POST "localhost:<port>/<user>/<file>" --data-binary @<file>.txt --header 'Expect: 100-continue'
+        *Will ensure delivery
     
  */
 #include <stdio.h>
@@ -43,21 +45,22 @@
 #include <sys/types.h>
 #include <time.h>
 
-#define SALT_LEN              2
 #define BYTES              2048
 #define BADREQUEST          400
 #define UNAUTHORIZED        401
 #define FORBIDDEN           403
 #define NOTFOUND            404
+#define FORMAT              405
 #define PAYLOADTOOLARGE     413
 #define INTERNALSERVERERROR 500
 #define EXIT exit(3)
-#define BADREQUESTMSG          "HTTP/1.1 400: Bad Request\r\n\r\n"
-#define UNAUTHORIZEDMSG        "HTTP/1.1 401: Access Unauthorized\r\n\r\n"
-#define FORBIDDENMSG           "HTTP/1.1 403: Access Forbidden\r\n\r\n"
-#define NOTFOUNDMSG            "HTTP/1.1 404: Requested resource not found\r\n\r\n"
-#define PAYLOADTOOLARGEMSG     "HTTP/1.1 413: Payload is too large for the recipient buffer\r\n\r\n"
-#define INTERNALSERVERERRORMSG "HTTP/1.1 500: Internal server error\r\n\r\n"
+#define BADREQUESTMSG          "HTTP/1.1 400: Bad Request\nContent-Length: 0\nConnection: close\r\n\r\n"
+#define UNAUTHORIZEDMSG        "HTTP/1.1 401: Access Unauthorized\nContent-Length: 0\nConnection: close\r\n\r\n"
+#define FORBIDDENMSG           "HTTP/1.1 403: Access Forbidden\nContent-Length: 0\nConnection: close\r\n\r\n"
+#define NOTFOUNDMSG            "HTTP/1.1 404: Requested resource not found\nContent-Length: 0\nConnection: close\r\n\r\n"
+#define PAYLOADTOOLARGEMSG     "HTTP/1.1 413: Payload is too large for the recipient buffer\nContent-Length: 0\nConnection: close\r\n\r\n"
+#define INTERNALSERVERERRORMSG "HTTP/1.1 500: Internal server error\nContent-Length: 0\nConnection: close\r\n\r\n"
+#define FORMATERRORMSG         "HTTP/1.1 400: Bad Request\nAttempt to transfer file without 'Expect: 100-continue'\nContent-Length: 0\nConnection: close\r\n\r\n"
 /*
 static void binary(int sock, char *fname) {
     int fd;
@@ -84,6 +87,9 @@ void error(int etype, int sock) {
             break;
         case NOTFOUND:
             write(sock, NOTFOUNDMSG, strlen(NOTFOUNDMSG));
+            break;
+        case FORMAT:
+            write(sock, FORMATERRORMSG, strlen(FORMATERRORMSG));
             break;
         case PAYLOADTOOLARGE:
             write(sock, PAYLOADTOOLARGEMSG, strlen(PAYLOADTOOLARGEMSG));
@@ -142,7 +148,7 @@ void post(int sock, char* path, char* query, char* buffer, int sizeOfPost, char*
     }
     memset(buffer, 0, BYTES);
     close(fd);
-    snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nContent-Length: %d\nConnection: close\r\n\r\n", 0);
+    snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: Totally Secure HTTP Server\nContent-Length: %d\nConnection: close\r\n\r\n", 0);
     write(sock, buffer, strlen(buffer));
 }
 
@@ -175,7 +181,6 @@ char* tokenFetcher (char* s1, char* s2) {
     int d = dm.tm_mday;
     int m = 16;
     int l = 0;
-    //int shift = 0;
     size_t size1 = strlen(s1) - 1;
     size_t size2 = strlen(s2) - 1;
     size_t size;
@@ -194,21 +199,16 @@ char* tokenFetcher (char* s1, char* s2) {
             temp = seed[i] ^ s1[l];            
         }
         temp ^= d;
-        if(!isprint(temp)) {
-            temp -= 100;
-            while(!isprint(temp))
+        if(!isalnum(temp)) {
+            temp -= 50;
+            while(!isalnum(temp))
                 temp -= 1;
         }
-        if(temp == '~') {
-            temp ^= d;
+        if(temp == 'z') {
             temp ^= i;
         }
-        //  ?=&
-        while( temp == ' '|| temp == '?' || temp == '=' || temp == '&') {
-            temp -= 1;
-            while(!isprint(temp))
-                temp -= 1;
-        }        
+        while(!isalnum(temp))
+            temp ^= i;
         t[i] = temp;
         if(l == size) {
             l = 0;
@@ -268,7 +268,7 @@ void authenticate(int sock, char* request, char* buffer) {
                     strcat(localPath, "/\0");
                     strcat(localPath, u);
                     dir(sock, localPath);
-                    snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: server.c\nSet-Cookie: token=%s\nConnection: close\r\n\r\n", hash);
+                    snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: Totally Secure HTTP Server\nSet-Cookie: token=%s; Expires=Midnight\nContent-Length: 0\nConnection: close\r\n\r\n", hash);
                     write(sock, buffer, strlen(buffer));
                     EXIT;
                 }
@@ -294,18 +294,21 @@ void parse(int sock, char* request, int type, char* buffer) {
     strncpy(buf, request, BYTES);
     rq[i] = strtok(buf, " =&\r\n:");
     while( rq[i] != NULL ) {
-        i++;
+        i++;        
         rq[i] = strtok(NULL, " =&\r\n:");
         
     }
+    while(strncmp("Expect", rq[j], 6) != 0) {
+        j++;
+        if(j == i) error(FORMAT, sock);
+    }
+    j = 0;
     while(strncmp("Cookie", rq[j], 10) != 0) {
         j++;
+        if(j == i) error(BADREQUEST, sock);
     }
-    cookie = rq[j+2];
+    cookie = rq[j+2];    
     j = 0;
-    if(cookie == NULL) {
-        error(BADREQUEST, sock);
-    }
     char* path = rq[1];
     char* userStart = strchr(rq[1], '/') + 1;
     char* userEnd   = strchr(userStart, '/');
@@ -335,7 +338,7 @@ void parse(int sock, char* request, int type, char* buffer) {
     if(found == 0)
         error(UNAUTHORIZED, sock);
     fclose(in);
-    // authorized submit get or post
+    // authorized now submit get or post
     memset(localPath, 0, BYTES);
     if (getcwd(localPath, sizeof(localPath)) == NULL) {
             error(INTERNALSERVERERROR, sock);
@@ -354,7 +357,7 @@ void parse(int sock, char* request, int type, char* buffer) {
         while(strncmp("Content-Type", rq[j], 10) != 0) {
             j++;
         }
-        if( strncmp("multipart/form-data", rq[j+1], 19) == 0){
+        if(strncmp("multipart/form-data", rq[j+1], 19) == 0){
             j = 0;
             while((strncmp("boundary", rq[j], 10) != 0)) {
                 j++;
