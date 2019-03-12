@@ -120,7 +120,7 @@ void post(int sock, char* path, char* query, char* buffer, int sizeOfPost, char*
     int received = 0;
     int headerDump = 0;
     void* buffr[BYTES];    
-    if(( fd = open(path, O_CREAT | O_RDWR)) == -1) {
+    if(( fd = open(path, O_CREAT | O_RDWR, 0666)) == -1) {
 		error(INTERNALSERVERERROR, sock);        
 	}
     char* bound;
@@ -183,6 +183,7 @@ char* tokenFetcher (char* s1, char* s2) {
     int l = 0;
     size_t size1 = strlen(s1) - 1;
     size_t size2 = strlen(s2) - 1;
+    size_t slen  = size1;
     size_t size;
     if( size1 < size2 ) {
         size = size1;
@@ -194,9 +195,15 @@ char* tokenFetcher (char* s1, char* s2) {
     char temp;
     for(int i = 0; i <= m; i++) {
         if( (i % 2) == 0 ) {
-            temp = seed[i] ^ s2[l];            
+            temp = seed[i] ^ s2[l];
         } else {
-            temp = seed[i] ^ s1[l];            
+            if((slen % 2) == 0) {
+                temp = seed[i] ^ s1[slen];
+                slen--;
+                if(slen <= 0) slen = size1;
+            } else {
+                temp = seed[i] ^ s1[l];
+            }
         }
         temp ^= d;
         if(!isalnum(temp)) {
@@ -254,23 +261,26 @@ void authenticate(int sock, char* request, char* buffer) {
     usize = psize = 0;
     while (fgets(s, BYTES, in) != NULL) {
         char* tu = strtok(s, ":");
+        if(tu[0] == '\n' || tu[0] == '\0') break;
         char* tp = strtok(NULL, "\n");
         usize = strlen(tu);
         psize = strlen(tp);
         if(usersize == usize) {
             if(strncmp(u, tu, usize) == 0) {
-                if(strncmp(p, tp, psize) == 0) {
-                    // generate token
-                    char* hash = NULL;
-                    hash = tokenFetcher(tu, tp);
-                    memset(localPath, 0, BYTES);
-                    getPath(sock, localPath);
-                    strcat(localPath, "/\0");
-                    strcat(localPath, u);
-                    dir(sock, localPath);
-                    snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: Totally Secure HTTP Server\nSet-Cookie: token=%s; Expires=Midnight\nContent-Length: 0\nConnection: close\r\n\r\n", hash);
-                    write(sock, buffer, strlen(buffer));
-                    EXIT;
+                if(passsize == psize) {
+                    if(strncmp(p, tp, psize) == 0) {
+                        // generate token
+                        char* hash = NULL;
+                        hash = tokenFetcher(tu, tp);
+                        memset(localPath, 0, BYTES);
+                        getPath(sock, localPath);
+                        strcat(localPath, "/\0");
+                        strcat(localPath, u);
+                        dir(sock, localPath);
+                        snprintf(buffer, BYTES, "HTTP/1.1 200 OK\nServer: Totally Secure HTTP Server\nSet-Cookie: token=%s; Expires=Midnight\nContent-Length: 0\nConnection: close\r\n\r\n", hash);
+                        write(sock, buffer, strlen(buffer));
+                        EXIT;
+                    }
                 }
             }
         }
